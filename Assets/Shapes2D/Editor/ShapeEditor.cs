@@ -16,7 +16,7 @@
             public bool showMaskGraphic;
         }
 
-        SerializedProperty shapeTypeProp, outlineSizeProp, blurProp,
+        SerializedProperty shapeTypeProp, outlineSizeProp, antialiasing, blurProp,
                 outlineColorProp, fillTypeProp, fillColorProp,
                 fillColor2Prop, gradientTypeProp, roundnessProp, roundnessTLProp,
                 roundnessTRProp, roundnessBLProp, roundnessBRProp, roundnessPerCornerProp,
@@ -24,59 +24,146 @@
                 gridSizeProp, lineSizeProp, triangleOffsetProp, fillScaleProp,
                 gradientAxisProp, polygonPresetProp, usePolygonMapProp,
                 startAngleProp, endAngleProp, invertArcProp, innerCutoutProp,
-                pathThicknessProp, fillPathLoopsProp;
+                pathThicknessProp, fillPathLoopsProp , resolutionMultiplierProp;
 
         bool isEditing; // true if we're in polygon/path edit mode in the scene view
         Tool preEditTool = Tool.None; // the tool the user had selected before clicking edit
+        private Vector3 initialPosition;
+        private Quaternion initialRotation;
+        private float initialSize;
+        private Tool lastTool = Tool.None;
+        private Canvas canvas;
+        private RenderMode previousRenderMode;
+        private Vector3 originalScale;
+        private float originalRoundness;
+        private float originalBlur;
+        private float originalOutlineSize;
+        private float originalLineSize;
+        private float originalGridSize;
+        private float originalPathThickness;
+        private Vector2 originalFillOffset;
+        private bool showInfoBox = false;
 
-        void OnEnable () {
-            Shape shape = (Shape) serializedObject.targetObject;
+        public void SwitchTo2D()
+        {
+        #if UNITY_EDITOR
+            foreach (SceneView sceneView in SceneView.sceneViews)
+            {
+                // If there's a GameObject selected, frame that.
+                if (Selection.activeGameObject != null)
+                {
+                    initialPosition = sceneView.pivot;
+                    initialSize = sceneView.size;
+                    initialRotation = sceneView.rotation;
 
-            if (!shape.GetComponent<SpriteRenderer>() 
-                    && !shape.GetComponent<Image>()) {
-                if (shape.GetComponentInParent<Canvas>() == null) {
-                    Undo.AddComponent<SpriteRenderer>(shape.gameObject);
-                } else {
-                    Undo.AddComponent<Image>(shape.gameObject);
+                    sceneView.orthographic = true;
+                    sceneView.rotation = Quaternion.identity;
+
+                    RectTransform rectTransform = Selection.activeGameObject.GetComponent<RectTransform>();
+                    if (rectTransform != null)
+                    {
+                        Bounds bounds = new Bounds(rectTransform.position, rectTransform.rect.size);
+                        sceneView.Frame(bounds, false);
+                    }
                 }
-                // collapse into the operation that made this happen
-                Undo.CollapseUndoOperations(Undo.GetCurrentGroup());
-                shape.Configure();
+                else
+                {
+                    // Otherwise, frame the entire scene.
+                    Bounds bounds = new Bounds(Vector3.zero, Vector3.one);
+                    foreach (GameObject go in FindObjectsOfType(typeof(GameObject)))
+                    {
+                        bounds.Encapsulate(go.transform.position);
+                    }
+                    sceneView.Frame(bounds, false);
+                }                
+                sceneView.Repaint();
             }
-            
-            shapeTypeProp = serializedObject.FindProperty("settings._shapeType");
-            outlineSizeProp = serializedObject.FindProperty("settings._outlineSize");
-            blurProp = serializedObject.FindProperty("settings._blur");
-            outlineColorProp = serializedObject.FindProperty("settings._outlineColor");
-            roundnessPerCornerProp = serializedObject.FindProperty("settings._roundnessPerCorner");
-            roundnessProp = serializedObject.FindProperty("settings._roundness");
-            roundnessTLProp = serializedObject.FindProperty("settings._roundnessTopLeft");
-            roundnessTRProp = serializedObject.FindProperty("settings._roundnessTopRight");
-            roundnessBLProp = serializedObject.FindProperty("settings._roundnessBottomLeft");
-            roundnessBRProp = serializedObject.FindProperty("settings._roundnessBottomRight");
-            innerCutoutProp = serializedObject.FindProperty("settings._innerCutout");
-            startAngleProp = serializedObject.FindProperty("settings._startAngle");
-            endAngleProp = serializedObject.FindProperty("settings._endAngle");
-            invertArcProp = serializedObject.FindProperty("settings._invertArc");
-            fillTypeProp = serializedObject.FindProperty("settings._fillType");
-            fillColorProp = serializedObject.FindProperty("settings._fillColor");
-            fillColor2Prop = serializedObject.FindProperty("settings._fillColor2");
-            fillRotationProp = serializedObject.FindProperty("settings._fillRotation");
-            fillOffsetProp = serializedObject.FindProperty("settings._fillOffset");
-            fillScaleProp = serializedObject.FindProperty("settings._fillScale");
-            gradientTypeProp = serializedObject.FindProperty("settings._gradientType");
-            gradientStartProp = serializedObject.FindProperty("settings._gradientStart");
-            gradientAxisProp = serializedObject.FindProperty("settings._gradientAxis");
-            fillTextureProp = serializedObject.FindProperty("settings._fillTexture");
-            gridSizeProp = serializedObject.FindProperty("settings._gridSize");
-            lineSizeProp = serializedObject.FindProperty("settings._lineSize");
-            triangleOffsetProp = serializedObject.FindProperty("settings._triangleOffset");
-            polygonPresetProp = serializedObject.FindProperty("settings._polygonPreset");
-            usePolygonMapProp = serializedObject.FindProperty("settings._usePolygonMap");
-            pathThicknessProp = serializedObject.FindProperty("settings._pathThickness");
-            fillPathLoopsProp = serializedObject.FindProperty("settings._fillPathLoops");
+        #endif
         }
-        
+        public void SwitchTo3D()
+        {
+        #if UNITY_EDITOR
+            foreach (SceneView sceneView in SceneView.sceneViews)
+            {
+                sceneView.orthographic = false;
+                sceneView.pivot = initialPosition;
+                sceneView.size = initialSize;
+                sceneView.rotation = initialRotation;
+
+                sceneView.Repaint();
+            }
+        #endif
+        }
+        #if UNITY_EDITOR
+            private void OnSceneGUI(SceneView sceneView)
+            {
+                if (sceneView.orthographic && sceneView.rotation != Quaternion.identity)
+                {
+                    sceneView.rotation = Quaternion.identity;
+                }
+            }
+        #endif
+            void OnEnable () {
+                lastTool = Tools.current;
+                Tools.current = Tool.None;
+                #if UNITY_EDITOR
+                    SceneView.duringSceneGui += this.OnSceneGUI;
+                #endif
+                Shape shape = (Shape) serializedObject.targetObject;
+
+                if (!shape.GetComponent<SpriteRenderer>() 
+                        && !shape.GetComponent<Image>()) {
+                    if (shape.GetComponentInParent<Canvas>() == null) {
+                        Undo.AddComponent<SpriteRenderer>(shape.gameObject);
+                    } else {
+                        Undo.AddComponent<Image>(shape.gameObject);
+                    }
+                    // collapse into the operation that made this happen
+                    Undo.CollapseUndoOperations(Undo.GetCurrentGroup());
+                    shape.Configure();
+                }
+                
+                shapeTypeProp = serializedObject.FindProperty("settings._shapeType");
+                outlineSizeProp = serializedObject.FindProperty("settings._outlineSize");
+                blurProp = serializedObject.FindProperty("settings._blur");
+                antialiasing = serializedObject.FindProperty("settings._antialiasing");
+                outlineColorProp = serializedObject.FindProperty("settings._outlineColor");
+                roundnessPerCornerProp = serializedObject.FindProperty("settings._roundnessPerCorner");
+                roundnessProp = serializedObject.FindProperty("settings._roundness");
+                roundnessTLProp = serializedObject.FindProperty("settings._roundnessTopLeft");
+                roundnessTRProp = serializedObject.FindProperty("settings._roundnessTopRight");
+                roundnessBLProp = serializedObject.FindProperty("settings._roundnessBottomLeft");
+                roundnessBRProp = serializedObject.FindProperty("settings._roundnessBottomRight");
+                innerCutoutProp = serializedObject.FindProperty("settings._innerCutout");
+                startAngleProp = serializedObject.FindProperty("settings._startAngle");
+                endAngleProp = serializedObject.FindProperty("settings._endAngle");
+                invertArcProp = serializedObject.FindProperty("settings._invertArc");
+                fillTypeProp = serializedObject.FindProperty("settings._fillType");
+                fillColorProp = serializedObject.FindProperty("settings._fillColor");
+                fillColor2Prop = serializedObject.FindProperty("settings._fillColor2");
+                fillRotationProp = serializedObject.FindProperty("settings._fillRotation");
+                fillOffsetProp = serializedObject.FindProperty("settings._fillOffset");
+                fillScaleProp = serializedObject.FindProperty("settings._fillScale");
+                gradientTypeProp = serializedObject.FindProperty("settings._gradientType");
+                gradientStartProp = serializedObject.FindProperty("settings._gradientStart");
+                gradientAxisProp = serializedObject.FindProperty("settings._gradientAxis");
+                fillTextureProp = serializedObject.FindProperty("settings._fillTexture");
+                gridSizeProp = serializedObject.FindProperty("settings._gridSize");
+                lineSizeProp = serializedObject.FindProperty("settings._lineSize");
+                triangleOffsetProp = serializedObject.FindProperty("settings._triangleOffset");
+                polygonPresetProp = serializedObject.FindProperty("settings._polygonPreset");
+                usePolygonMapProp = serializedObject.FindProperty("settings._usePolygonMap");
+                pathThicknessProp = serializedObject.FindProperty("settings._pathThickness");
+                fillPathLoopsProp = serializedObject.FindProperty("settings._fillPathLoops");
+                resolutionMultiplierProp = serializedObject.FindProperty("settings._resolutionMultiplier");
+            }
+            private void OnDisable()
+            {
+                Tools.current = lastTool;
+                #if UNITY_EDITOR
+                    SceneView.duringSceneGui -= this.OnSceneGUI;
+                #endif
+            }
         // blend two colors in the same way the shape shader would (premultiplied alpha,
         // but for this process we have turned off the premultiply step so it's just
         // normal alpha blending).  note that for layered semi-transparent regions this
@@ -305,6 +392,7 @@
         }
 
         private void EditShape() {
+            SwitchTo2D();
             isEditing = true;
             preEditTool = Tools.current;
             Tools.current = Tool.None;
@@ -316,6 +404,7 @@
             if (restoreTool)
                 Tools.current = preEditTool;
             UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+            SwitchTo3D();
         }
 
         // verts has the first point duplicated at the end as well
@@ -710,6 +799,34 @@
         }
 
         private void ConvertToSprite(Shape shape) {
+
+            float resolutionMultiplier = shape.settings.resolutionMultiplier;
+            originalScale = shape.transform.localScale;
+            originalRoundness = shape.settings.roundness;
+            originalBlur = shape.settings.blur;
+            originalOutlineSize = shape.settings.outlineSize;
+            originalLineSize = shape.settings.lineSize;
+            originalGridSize = shape.settings.gridSize;
+            originalPathThickness = shape.settings.pathThickness;
+            originalFillOffset = shape.settings.fillOffset;
+
+            shape.transform.localScale = originalScale * resolutionMultiplier;
+            shape.settings.roundness = originalRoundness * resolutionMultiplier;
+            shape.settings.blur = originalBlur * resolutionMultiplier;
+            shape.settings.outlineSize = originalOutlineSize * resolutionMultiplier;
+            shape.settings.lineSize = originalLineSize * resolutionMultiplier;
+            shape.settings.gridSize = originalGridSize * resolutionMultiplier;
+            shape.settings.pathThickness = originalPathThickness * resolutionMultiplier;
+            shape.settings.fillOffset = originalFillOffset * resolutionMultiplier;
+
+            canvas = shape.GetComponentInParent<Canvas>();
+            if (canvas != null)
+            {
+                // Save the previous render mode
+                previousRenderMode = canvas.renderMode;
+                // Set to overlay
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            }
             string dname = "Assets/Resources/Shapes2D Sprites";
             string fname = dname + "/" + shape.name + ".png"; 
             string rname = "Shapes2D Sprites/" + shape.name;
@@ -764,10 +881,24 @@
             
             // exit the gui routine because otherwise we get annoying errors because
             // we deleted a material and unity still wants to draw it
+            if (canvas != null)
+            {
+                // Restore the render mode
+                canvas.renderMode = previousRenderMode;
+            }
+            shape.transform.localScale = originalScale;
+            shape.settings.roundness = originalRoundness;
+            shape.settings.blur = originalBlur;
+            shape.settings.outlineSize = originalOutlineSize;
+            shape.settings.lineSize = originalLineSize;
+            shape.settings.gridSize = originalGridSize;
+            shape.settings.pathThickness = originalPathThickness;
+            shape.settings.fillOffset = originalFillOffset;
             EditorGUIUtility.ExitGUI();
         }
 
-        public override void OnInspectorGUI() {
+        public override void OnInspectorGUI()
+        {
             serializedObject.Update(); // dunno what this does but it's in the examples?
             
             Shape shape = (Shape) serializedObject.targetObject;
@@ -778,6 +909,7 @@
             EditorGUILayout.PropertyField(shapeTypeProp);
 
             ShapeType shapeType = (ShapeType) shapeTypeProp.enumValueIndex;
+            EditorGUILayout.PropertyField(antialiasing);
             if (shapeType == ShapeType.Rectangle) {
                 // rectangle props
                 EditorGUILayout.PropertyField(roundnessPerCornerProp);
@@ -875,8 +1007,9 @@
                     || fillType == FillType.CheckerBoard) {
                 EditorGUILayout.PropertyField(gridSizeProp);
             }
-            
+            EditorGUILayout.PropertyField(resolutionMultiplierProp);
             EditorGUI.BeginDisabledGroup(Selection.objects.Length != 1);
+            GUILayout.Space(5);
             if (GUILayout.Button("Convert to Sprite"))
                 ConvertToSprite(shape);
             EditorGUI.EndDisabledGroup();
@@ -896,6 +1029,34 @@
                     shape.RestoreFromConversion();
                 // combine with the re-enable action
                 Undo.CollapseUndoOperations(Undo.GetCurrentGroup());
+            }
+            GUILayout.Space(5);
+            if (GUILayout.Button(showInfoBox ? "Hide" : "About"))
+            {
+                showInfoBox = !showInfoBox;
+            }
+
+            if (showInfoBox)
+            {
+                EditorGUILayout.HelpBox("This is a fork of the Shapes2D plugin that attempts to implement some major fixes. If the sprite looks blurry or pixelated try toggling anti-aliasing, modifying the blur value or increasing the resolution multiplier. \n\n- For more information please refer to the documentation or visit the GitHub page. \n\n- For further support join the official Discord server.", MessageType.Info);
+                GUILayout.BeginHorizontal();
+                
+                if (GUILayout.Button("Github"))
+                {
+                    Application.OpenURL("https://github.com/VladTaranu/shapes2d");
+                }
+
+                if (GUILayout.Button("Discord"))
+                {
+                    Application.OpenURL("https://discord.com/invite/U7x8Yum");
+                }
+
+                if (GUILayout.Button("Docs"))
+                {
+                    Application.OpenURL("https://sub-c.org/Shapes2D/documentation");
+                }
+
+                GUILayout.EndHorizontal();
             }
         }
     }

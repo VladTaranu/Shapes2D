@@ -4,7 +4,6 @@
     using UnityEngine.UI;
     using System.Collections.Generic;
     using UnityEngine.Serialization;
-
     /// <summary>
     /// Shapes2D base shape types.
     /// </summary>
@@ -97,6 +96,10 @@
     [ExecuteInEditMode]
     public class Shape : MonoBehaviour, IMaterialModifier {
 
+        private void OnEnable()
+        {
+            Configure();
+        }
         static Vector2[] GetVerticesForPreset(PolygonPreset preset) {
             if (preset == PolygonPreset.Triangle) {
                 return new Vector2[] { new Vector2(0, 0.5f), new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f) }; 
@@ -222,6 +225,11 @@
             [System.NonSerializedAttribute]
             public bool polyMapNeedsRegen = true;
 
+            [SerializeField]
+            [FormerlySerializedAs("antialiasing")]
+            private bool _antialiasing = true;
+
+            public bool antialiasing { get { return _antialiasing; } set { _antialiasing = value; dirty = true; } }
             [SerializeField]
             [FormerlySerializedAs("blur")]
             private float _blur = 0f;
@@ -547,7 +555,10 @@
             /// It may be a little clumsy but you should be able to get any triangle you want by using triangleOffset and rotating the Shape.
             /// </summary>
             public float triangleOffset { get { return _triangleOffset; } set { _triangleOffset = value; dirty = true; } } 
-
+            [SerializeField]
+            [FormerlySerializedAs("resolutionMultiplier")]
+            private float _resolutionMultiplier = 1f;
+            public float resolutionMultiplier { get { return _resolutionMultiplier; } set { _resolutionMultiplier = value; dirty = true; } } 
             [SerializeField]
             private bool _usePolygonMap = false;
             /// <summary>
@@ -574,7 +585,37 @@
             // settings common to all shapes
             public ShapeType shapeType = ShapeType.Rectangle;
             public float outlineSize = 0.03f;
-            public float blur = 0.027f;
+            private bool _antialiasing = true;
+            private float _blur = 0.027f;
+
+            public bool antialiasing
+            {
+                get { return _antialiasing; }
+                set
+                {
+                    _antialiasing = value;
+                    UpdateBlurValue();
+                }
+            }
+
+            public float blur
+            {
+                get { return _blur; }
+                set
+                {
+                    _blur = value;
+                    UpdateBlurValue();
+                }
+            }
+
+            private void UpdateBlurValue()
+            {
+                if (!_antialiasing && _blur == 0)
+                {
+                    _blur = 0.00001f;
+                }
+            }
+
             public Color outlineColor = new Color(1, 1, 1, 1);
             public FillType fillType = FillType.MatchOutlineColor;
             public Color fillColor = new Color(1, 1, 1, 1);
@@ -606,6 +647,7 @@
             // settings for polygons
             public int numPolyVerts;
             public Vector4[] polyVertices;
+            public float resolutionMultiplier = 1;
             public bool usePolygonMap;
             public Texture2D polyMap;
 
@@ -826,13 +868,25 @@
             material.SetFloat("_YScale", shaderSettings.yScale);
             material.SetFloat("_OutlineSize", shaderSettings.outlineSize);
             material.SetFloat("_Blur", shaderSettings.blur);
-            material.SetColor("_OutlineColor", shaderSettings.outlineColor);
+            // Colors from the inspector are in sRGB, but I found a unity forum post that says Unity is supposed to 
+            // convert to linear when you call material.SetColor().  however, we're not getting correct colors in
+            // linear color space unless we convert to linear here, so I'm not sure where it's going wrong.
+            var outlineColor = shaderSettings.outlineColor;
+            var fillColor = shaderSettings.fillColor;
+            var fillColor2 = shaderSettings.fillColor2;
+            if (QualitySettings.activeColorSpace == ColorSpace.Linear) {
+                outlineColor = outlineColor.linear;
+                fillColor = fillColor.linear;
+                fillColor2 = fillColor2.linear;
+            }
+            material.SetColor("_OutlineColor", outlineColor);
+            material.SetFloat("_resolutionMultiplier", shaderSettings.resolutionMultiplier);
             if (shaderSettings.fillType >= FillType.SolidColor 
                     && shaderSettings.fillType < FillType.Texture)
-                material.SetColor("_FillColor", shaderSettings.fillColor);
+                material.SetColor("_FillColor", fillColor);
             if (shaderSettings.fillType >= FillType.Gradient
                     && shaderSettings.fillType < FillType.Texture)
-                material.SetColor("_FillColor2", shaderSettings.fillColor2);
+                material.SetColor("_FillColor2", fillColor2);
             if (shaderSettings.fillType > FillType.SolidColor) {
                 material.SetFloat("_FillRotation", shaderSettings.fillRotation);
                 material.SetFloat("_FillOffsetX", shaderSettings.fillOffset.x);
@@ -923,8 +977,8 @@
                 bottomLeft = transform.InverseTransformPoint(bottomLeft);
                 topRight = transform.InverseTransformPoint(topRight);
                 bottomRight = transform.InverseTransformPoint(bottomRight);
-                size.x = Vector3.Distance(topLeft, topRight);
-                size.y = Vector3.Distance(topLeft, bottomLeft);
+                size.x = Vector2.Distance(topLeft, topRight);
+                size.y = Vector2.Distance(topLeft, bottomLeft);
                 size /= image.canvas.scaleFactor;
             } else {
                 return new Vector2(1, 1);
@@ -957,8 +1011,8 @@
                 var scaleFactor = image.canvas.scaleFactor;
                 if (image.canvas.renderMode == RenderMode.ScreenSpaceCamera)
                     scaleFactor = image.canvas.transform.lossyScale.x;
-                size.x = Vector3.Distance(topLeft, topRight) / scaleFactor;
-                size.y = Vector3.Distance(topLeft, bottomLeft) / scaleFactor;
+                size.x = Vector2.Distance(topLeft, topRight) / scaleFactor;
+                size.y = Vector2.Distance(topLeft, bottomLeft) / scaleFactor;
             } else {
                 // get the size for normal Transform objects
                 size.x = transform.lossyScale.x;
@@ -983,9 +1037,10 @@
 
             // common shader properties
             shaderSettings.outlineSize = settings.outlineSize;
+            shaderSettings.antialiasing = settings.antialiasing;
             shaderSettings.blur = settings.blur;
+            shaderSettings.resolutionMultiplier = settings.resolutionMultiplier;
             shaderSettings.outlineColor = settings.outlineColor;
-
             // sanitize some properties for the shader
             float minDim = Mathf.Min(shaderSettings.xScale, shaderSettings.yScale);
             shaderSettings.outlineSize = Mathf.Min(shaderSettings.outlineSize, minDim / 2);
@@ -1061,7 +1116,7 @@
                 if (shaderSettings.usePolygonMap) {
                     if (shaderSettings.polyMap == null) {
                         shaderSettings.polyMap = new Texture2D(PolyMapResolution, 
-                                PolyMapResolution, TextureFormat.ARGB32, false, true);
+                                PolyMapResolution, TextureFormat.ARGB32, false);
                         shaderSettings.polyMap.filterMode = FilterMode.Point;
                         shaderSettings.polyMap.wrapMode = TextureWrapMode.Clamp;
                     }
@@ -1267,7 +1322,7 @@
             settings.gridSize = settings.gridSize;
             settings.innerCutout = settings.innerCutout;
             settings.pathThickness = settings.pathThickness;
-
+            settings.resolutionMultiplier = settings.resolutionMultiplier;
             #if UNITY_EDITOR
                 CheckForShaderReset();
             #endif
