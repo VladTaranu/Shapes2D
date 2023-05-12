@@ -1,4 +1,4 @@
-**Shapes2D** is a useful Unity tool for easily creating art assets in the Unity editor. This Shapes2D fork that attempts to implement several temporary fixes:   
+**Shapes2D** is a useful Unity tool for easily creating art assets in the Unity editor. This Shapes2D fork attempts to implement several temporary fixes:   
   * Added anti-aliasing toggle support for fixing the blurry sprites after export;
   * Introduced resolution multiplier in order to get rid of the pixelation in shapes;
   * Resolved problems with polygon/path editor in 3D scene view;
@@ -6,6 +6,7 @@
   * Patched the unloded (invisible) sprites issue after initiating the shapes;
   * Fixed incorrect colors on linear color space;
   * Added some useful tips and links in the inspector to save you from many headaches.
+ 
 Known issues:
   * Overlapping masks (one solution is to export the sprite).
 
