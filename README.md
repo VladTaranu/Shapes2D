@@ -9,6 +9,7 @@
  
 Known issues:
   * Overlapping masks (one solution is to export the sprite).
+  * If the shape is rendered incorrectly try disabling the children.
 
 Untested:
   * 2D shapes;
