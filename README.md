@@ -8,7 +8,7 @@
   * Added some useful tips and links in the inspector to save you from many headaches.
  
 Known issues:
-  * Overlapping masks (one solution is to export the sprite).
+  * Overlapping masks (one solution is to export the sprite);
   * If the shape is rendered incorrectly try disabling the children.
 
 Untested:
